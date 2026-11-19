@@ -21,10 +21,27 @@ if (typeof makeWASocket !== "function") {
 
 const PORT = process.env.PORT || 3000;
 const SERVICE_TOKEN = process.env.SERVICE_TOKEN || "change-me";
-const AUTH_DIR = process.env.AUTH_DIR || "/data/auth";
+// \u0645\u062C\u0644\u062F \u0627\u0644\u062A\u062E\u0632\u064A\u0646: \u064A\u062C\u0631\u0651\u0628 AUTH_DIR \u062B\u0645 /data/auth \u062B\u0645 \u0645\u062C\u0644\u062F \u062F\u0627\u062E\u0644 \u0627\u0644\u0645\u0634\u0631\u0648\u0639.
+// \u0647\u0643\u0630\u0627 \u0644\u0627 \u064A\u062A\u0648\u0642\u0641 \u0627\u0644\u0633\u064A\u0631\u0641\u0631 \u0623\u0628\u062F\u0627\u064B \u0628\u062E\u0637\u0623 EACCES (\u0645\u062B\u0644 Render \u0628\u062F\u0648\u0646 \u0642\u0631\u0635 /data).
+import { access, constants as fsConstants } from "node:fs/promises";
+async function pickWritableDir() {
+  const candidates = [process.env.AUTH_DIR, "/data/auth", "/var/data/auth", path.join(process.cwd(), "data", "auth"), path.join("/tmp", "wa-data", "auth")].filter(Boolean);
+  for (const dir of candidates) {
+    try {
+      await mkdir(dir, { recursive: true });
+      await access(dir, fsConstants.W_OK);
+      return dir;
+    } catch (e) {
+      console.warn("storage dir not usable:", dir, e?.code || e?.message);
+    }
+  }
+  throw new Error("no writable storage directory");
+}
+const AUTH_DIR = await pickWritableDir();
 const DATA_DIR = path.dirname(AUTH_DIR);
 const INBOX_FILE = path.join(DATA_DIR, "inbox.json");
 const MEDIA_DIR = path.join(DATA_DIR, "media");
+console.log("storage directory:", DATA_DIR);
 const MAX_PER_CHAT = 300;
 
 if (SERVICE_TOKEN === "change-me") {
@@ -45,7 +62,7 @@ let generation = 0;
 let startupError = "";
 
 
-/* ===================== صندوق الوارد: حفظ كل الرسائل ===================== */
+/* ===================== \u0635\u0646\u062F\u0648\u0642 \u0627\u0644\u0648\u0627\u0631\u062F: \u062D\u0641\u0638 \u0643\u0644 \u0627\u0644\u0631\u0633\u0627\u0626\u0644 ===================== */
 let inbox = {};
 let saveTimer = null;
 async function loadInbox() {
@@ -61,7 +78,7 @@ function saveInbox() {
 function msgText(m) {
   const x = m.message || {};
   const inner = x.ephemeralMessage?.message || x.viewOnceMessage?.message || x;
-  return inner.conversation || inner.extendedTextMessage?.text || inner.imageMessage?.caption || inner.videoMessage?.caption || inner.documentMessage?.fileName || (inner.audioMessage ? "🎤 رسالة صوتية" : "") || (inner.stickerMessage ? "ملصق" : "") || (inner.locationMessage ? "📍 موقع" : "") || "";
+  return inner.conversation || inner.extendedTextMessage?.text || inner.imageMessage?.caption || inner.videoMessage?.caption || inner.documentMessage?.fileName || (inner.audioMessage ? "\u{1f3a4} \u0631\u0633\u0627\u0644\u0629 \u0635\u0648\u062A\u064A\u0629" : "") || (inner.stickerMessage ? "\u0645\u0644\u0635\u0642" : "") || (inner.locationMessage ? "\u{1f4cd} \u0645\u0648\u0642\u0639" : "") || "";
 }
 function isImage(m) {
   const x = m.message || {};
@@ -144,7 +161,7 @@ async function start() {
       connected = true;
       lastQr = "";
       startupError = "";
-      console.log("WhatsApp connected ✅");
+      console.log("WhatsApp connected \u2705");
     }
     if (connection === "close") {
       connected = false;
@@ -175,7 +192,7 @@ function auth(req, res, next) {
   next();
 }
 
-app.get("/", (_req, res) => res.json({ ok: true, service: "whatsapp-notifier" }));
+app.get("/", (_req, res) => res.json({ ok: true, service: "whatsapp-notifier", version: "4.0.0", storage: DATA_DIR }));
 
 app.get("/status", auth, (_req, res) => {
   res.json({
@@ -184,7 +201,9 @@ app.get("/status", auth, (_req, res) => {
     status: startupError ? "error" : connected ? "connected" : starting ? "starting" : "waiting",
     error: startupError || undefined,
     qr: lastQr || undefined,
-    persistentAuth: AUTH_DIR.startsWith("/data/"),
+    persistentAuth: !AUTH_DIR.startsWith("/tmp") && !AUTH_DIR.startsWith(process.cwd()),
+    storage: DATA_DIR,
+    serverVersion: "4.0.0",
   });
 });
 
@@ -223,7 +242,7 @@ app.post("/read", auth, (req, res) => {
   res.json({ ok: true });
 });
 
-// الصور: تُطلب بالتوكن في الرابط لأن وسم <img> لا يرسل ترويسات
+// \u0627\u0644\u0635\u0648\u0631: \u062A\u064F\u0637\u0644\u0628 \u0628\u0627\u0644\u062A\u0648\u0643\u0646 \u0641\u064A \u0627\u0644\u0631\u0627\u0628\u0637 \u0644\u0623\u0646 \u0648\u0633\u0645 <img> \u0644\u0627 \u064A\u0631\u0633\u0644 \u062A\u0631\u0648\u064A\u0633\u0627\u062A
 app.get("/media/:id", async (req, res) => {
   if (req.query.token !== SERVICE_TOKEN) return res.status(401).end();
   const id = String(req.params.id).replace(/[^A-Za-z0-9_-]/g, "");

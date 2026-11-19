@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: whatsapp-server
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: SERVICE_TOKEN
+        sync: false
+      - key: AUTH_DIR
+        value: /var/data/auth
+    disk:
+      name: wa-data
+      mountPath: /var/data
+      sizeGB: 1
